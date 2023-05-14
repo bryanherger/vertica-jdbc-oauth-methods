@@ -1,0 +1,11 @@
+host=192.168.1.222
+port=5433
+dbName=db
+username=moe.howard@vertica.com
+password=password
+clientSecret=secret
+clientId=id
+endpoint=subdomain.okta.com
+grant_type=password
+scope=offline_access openid
+validateHost=false
