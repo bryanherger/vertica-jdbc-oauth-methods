@@ -1,24 +1,30 @@
 package com.vertica.poc;
 
+import com.google.gson.Gson;
+import org.apache.hc.client5.http.fluent.Content;
+import org.apache.hc.client5.http.fluent.Form;
+import org.apache.hc.client5.http.fluent.Request;
+
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.*;
-import java.nio.charset.Charset;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublishers;
+import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.*;
-
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import org.apache.hc.client5.http.fluent.Content;
-import org.apache.hc.client5.http.fluent.Form;
-import org.apache.hc.client5.http.fluent.Request;
 
 // this class borrows a lot from https://github.com/snowflakedb/snowflake-jdbc/blob/master/src/main/java/net/snowflake/client/core/SessionUtilExternalBrowser.java
 public class OAuthHandler {
@@ -33,6 +39,7 @@ public class OAuthHandler {
     String clientSecret = "";
     String clientId = "";
     String endpoint = "";
+    String authUrl = "";
     String tokenUrl = "";
     String grant_type = "";
     String scope = "";
@@ -48,8 +55,10 @@ public class OAuthHandler {
         password = props.getProperty("password");
         clientSecret = props.getProperty("clientSecret");
         clientId = props.getProperty("clientId");
-        endpoint = props.getProperty("endpoint");
-        tokenUrl = "https://"+endpoint+"/oauth2/default/v1/token";
+        //endpoint = props.getProperty("endpoint");
+        //tokenUrl = "https://"+endpoint+"/oauth2/default/v1/token";
+        tokenUrl = props.getProperty("tokenUrl");
+        authUrl = props.getProperty("authUrl");
         grant_type = props.getProperty("grant_type","password");
         scope = props.getProperty("scope","offline_access openid");
         validateHost = props.getProperty("validateHost","false");
@@ -91,8 +100,8 @@ public class OAuthHandler {
         String jsonConfig = "{\"oauthtokenurl\" : \"" + tokenUrl + "\", " +
                 "\"oauthclientid\" : \"" + clientId + "\", " +
                 "\"oauthclientsecret\" : \"" + clientSecret + "\", " +
-                "\"oauthvalidatehostname\" : \"" + validateHost + "\", " +
-                "\"oauthscope\" : \"" + scope + "\"" +
+                "\"oauthvalidatehostname\" : \"" + validateHost + "\"" +
+                //", " + "\"oauthscope\" : \"" + scope + "\"" +
                 "}";
         //System.out.println(jsonConfig);
         jdbcOptions.put("oauthjsonconfig", jsonConfig);
@@ -122,7 +131,8 @@ public class OAuthHandler {
     // get the authorization code from browser login and callback, then exchange for access token
     public void getTokenInteractive() throws Exception {
         // open browser
-        String oauthLoginUrl = "https://"+endpoint+"/oauth2/default/v1/authorize?client_id="+clientId+"&response_type=code&scope=openid&redirect_uri=http%3A%2F%2Flocalhost%3A32132&state=state-296bc9a0-a2a2-4a57-be1a-d0e2fd9bb601";
+        String stateUuid = UUID.randomUUID().toString();
+        String oauthLoginUrl = authUrl+"?client_id="+clientId+"&response_type=code&scope="+scope+"&redirect_uri=http%3A%2F%2Flocalhost%3A32132&state="+stateUuid;
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
             Desktop.getDesktop().browse(new URI(oauthLoginUrl));
         } else {
@@ -145,11 +155,28 @@ public class OAuthHandler {
                 int strLen = in.read(buf);
                 String[] rets = new String(buf, 0, strLen).split("\r\n");
                 for (int i = 0; i < rets.length; i++) {
-                    //System.err.println("::" + rets[i]);
-                    if (rets[i].startsWith("GET /?code=")) {
+                    // GCP and Okta format the redirect differently, so we need to parse out to a Map
+                    if (rets[i].contains("code=")) {
                         // probably should validate state also
-                        authCode = rets[i].substring(11, rets[i].indexOf('&'));
-                        //System.err.println("found code|"+authCode+"|");
+                        String getCodes = rets[i].substring(6, rets[i].indexOf(' ',8));
+                        System.err.println("::" + getCodes);
+                        Map<String, String> getMap = new HashMap<>();
+                        for (String getCode : getCodes.split("&")) {
+                            String[] getTokens = getCode.split("=");
+                            getMap.put(getTokens[0], getTokens[1]);
+                            System.err.println("Map put|"+getTokens[0]+"|"+getTokens[1]+"|");
+                        }
+                        String verifyUuid = getMap.get("state");
+                        authCode = getMap.get("code");
+                        if (authCode == null || "".equalsIgnoreCase(authCode)) {
+                            throw new Exception("Didn't get an authorization code from endpoint!");
+                        }
+                        //System.err.println("found codes|"+authCode+"|"+verifyUuid);
+                        if (verifyUuid.equalsIgnoreCase(stateUuid)) {
+                            System.err.println("state token is correct!");
+                        } else {
+                            throw new Exception("state token doesn't match!");
+                        }
                         returnToBrowser(socket);
                         break;
                     }
@@ -164,23 +191,20 @@ public class OAuthHandler {
         // now exchange auth code for token
         String authBase64 = Base64.getEncoder().encodeToString((clientId+":"+clientSecret).getBytes(StandardCharsets.UTF_8));
         //System.err.println("authBase64:"+authBase64);
-            /*Content response = Request.post("https://X.okta.com/oauth2/default/v1/token")
-                    .addHeader("Authorization", "Basic "+Base64.getEncoder().encodeToString(authBase64.getBytes(StandardCharsets.UTF_8)))
-                    .addHeader("Accept", "application/json")
-                    .addHeader("Content-Type", "application/x-www-form-urlencoded")
-                    .bodyForm(Form.form().add("code", authCode)
-                            .add("grant_type", "authorization_code")
-                            .add("redirect_uri", "http://localhost:32132")
-                            .build())
-                    .execute().returnContent();*/
-        Content response = Request.post("https://"+endpoint+"/oauth2/default/v1/token?code="+authCode+"&grant_type=authorization_code&redirect_uri=http%3A%2F%2Flocalhost%3A32132")
-                .addHeader("Authorization", "Basic "+authBase64)
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/x-www-form-urlencoded")
-                .execute().returnContent();
-        //System.out.println(response.asString());
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(tokenUrl))
+                .POST(BodyPublishers.ofString("grant_type=authorization_code&redirect_uri=http%3A%2F%2Flocalhost%3A32132&code="+authCode))
+                .setHeader("accept", "application/json")
+                .setHeader("authorization", "Basic "+authBase64)
+                .setHeader("content-type", "application/x-www-form-urlencoded")
+                .build();
+
+        HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
+        System.err.println("body():"+response.body());
         Gson gson = new Gson();
-        OAuthResponse oar = gson.fromJson(response.asString(), OAuthResponse.class);
+        OAuthResponse oar = gson.fromJson(response.body(), OAuthResponse.class);
         //System.out.println(oar.access_token + "|" + oar.refresh_token);
         accessToken = oar.access_token;
         refreshToken = oar.refresh_token;

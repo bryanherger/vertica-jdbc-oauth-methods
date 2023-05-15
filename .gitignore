@@ -1,2 +1,3 @@
-voauth.properties
+voauth*.properties
 target/*
+*.bak

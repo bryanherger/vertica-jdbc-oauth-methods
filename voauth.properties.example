@@ -7,5 +7,5 @@ clientSecret=secret
 clientId=id
 endpoint=subdomain.okta.com
 grant_type=password
-scope=offline_access openid
+scope=offline_access%20openid
 validateHost=false
