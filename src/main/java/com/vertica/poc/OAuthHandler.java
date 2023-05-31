@@ -38,7 +38,7 @@ public class OAuthHandler {
     String password = "";
     String clientSecret = "";
     String clientId = "";
-    String endpoint = "";
+    String redirectUrl = "";
     String authUrl = "";
     String tokenUrl = "";
     String grant_type = "";
@@ -59,6 +59,7 @@ public class OAuthHandler {
         //tokenUrl = "https://"+endpoint+"/oauth2/default/v1/token";
         tokenUrl = props.getProperty("tokenUrl");
         authUrl = props.getProperty("authUrl");
+        redirectUrl = props.getProperty("redirectUrl");
         grant_type = props.getProperty("grant_type","password");
         scope = props.getProperty("scope","offline_access openid");
         validateHost = props.getProperty("validateHost","false");
@@ -111,7 +112,7 @@ public class OAuthHandler {
         Statement s = c.createStatement();
         ResultSet rs = s.executeQuery("SELECT CURRENT_USER;");
         while (rs.next()) {
-            System.out.println("CURRENT_USER: " + rs.getString(1));
+            System.out.println("SELECT CURRENT_USER returned: " + rs.getString(1));
         }
     }
 
@@ -195,7 +196,7 @@ public class OAuthHandler {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(tokenUrl))
-                .POST(BodyPublishers.ofString("grant_type=authorization_code&redirect_uri=http%3A%2F%2Flocalhost%3A32132&code="+authCode))
+                .POST(BodyPublishers.ofString("grant_type=authorization_code&redirect_uri="+redirectUrl+"&code="+authCode))
                 .setHeader("accept", "application/json")
                 .setHeader("authorization", "Basic "+authBase64)
                 .setHeader("content-type", "application/x-www-form-urlencoded")
@@ -211,9 +212,19 @@ public class OAuthHandler {
     }
     // go get the token directly with username/password
     public void getTokenNonInteractive() throws Exception {
-        //String request = "curl --insecure -d \"client_id=0oa4gdz47lUifBW125d7\" -d \"client_secret=DEeM-SkIFa9MTQwKq0W3NCGwhGlI1uv6zoNYpiaQ\" -d \"username=bud.abbott%40vertica.com\" -d \"password=MFGP1234\" -d \"grant_type=password\" -d \"scope=offline_access%20openid\" https://*2571.okta.com/oauth2/default/v1/token";
+        //String request = "curl --insecure -d \"client_id=\" -d \"client_secret=\" -d \"username=bud.abbott%40vertica.com\" -d \"password=\" -d \"grant_type=password\" -d \"scope=offline_access%20openid\" https://okta.com/oauth2/default/v1/token";
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(tokenUrl))
+                .POST(BodyPublishers.ofString("client_id="+clientId+"&client_secret="+clientSecret+"&username="+username+"&password="+password+"&grant_type="+grant_type+"&scope="+scope+""))
+                .setHeader("Content-Type", "application/x-www-form-urlencoded")
+                .build();
+
+        HttpResponse<String> hresponse = client.send(request, HttpResponse.BodyHandlers.ofString());
+        System.err.println("body():"+hresponse.body());
         //Content response = Request.get(request).execute().returnContent();
-        Content response = Request.post(tokenUrl)
+        /*Content response = Request.post(tokenUrl)
                 .bodyForm(Form.form().add("client_id", clientId)
                         .add("client_secret", clientSecret)
                         .add("username", username)
@@ -221,10 +232,11 @@ public class OAuthHandler {
                         .add("grant_type", grant_type)
                         .add("scope", scope)
                         .build())
-                .execute().returnContent();
+                .execute().returnContent();*/
         //System.out.println(response.asString());
+        //OAuthResponse oar = gson.fromJson(response.asString(), OAuthResponse.class);
         Gson gson = new Gson();
-        OAuthResponse oar = gson.fromJson(response.asString(), OAuthResponse.class);
+        OAuthResponse oar = gson.fromJson(hresponse.body(), OAuthResponse.class);
         //System.out.println(oar.access_token + "|" + oar.refresh_token);
         accessToken = oar.access_token;
         refreshToken = oar.refresh_token;

@@ -1,10 +1,14 @@
+# URL encode all parameters as shown
 host=192.168.1.222
 port=5433
 dbName=db
-username=moe.howard@vertica.com
+username=moe.howard%40vertica.com
 password=password
 clientSecret=secret
 clientId=id
+tokenUrl=https://okta.com/oauth2/default/v1/token
+authUrl=https://okta.com/oauth2/default/v1/authorize
+redirectUrl=http%3A%2F%2Flocalhost%3A32132
 endpoint=subdomain.okta.com
 grant_type=password
 scope=offline_access%20openid

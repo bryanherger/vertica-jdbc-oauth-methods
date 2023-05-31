@@ -1,6 +1,7 @@
 package com.vertica.poc;
 
 // Maven: build with "mvn clean package assembly:single"
+// Cmd: run with "java -jar .\target\vertica-jdbc-oauth-methods-0.1-jar-with-dependencies.jar .\voauth.gcp.properties browser"
 
 public class JdbcTest {
 
